@@ -50,8 +50,6 @@ The engine root renders the dashboard at `/ops/jobs`, and the jobs index is avai
 - Rails 7.1
 - Solid Queue 1.x
 
-If you are using Rails 8, you can install the gem normally without pinning Rails back to 7.x:
-
 ```ruby
 gem "solid_queue_lite"
 ```
@@ -110,7 +108,7 @@ To force an immediate current telemetry snapshot after upgrading, run:
 bin/rake solid_queue_lite:telemetry:backfill
 ```
 
-The historical `scheduled_count` and `success_count` series cannot be reconstructed exactly for old rows because Solid Queue does not retain that event history. The backfill task writes or refreshes a current snapshot immediately so upgraded installs do not need to wait for the next scheduled sample.
+The historical `scheduled_count` and `success_count` series cannot be reconstructed exactly for old rows because Solid Queue does not retain that event history. The backfill task writes or refreshes the current snapshot immediately, so upgraded installs do not need to wait for the next scheduled sample.
 
 ### Core Design Decisions
 
@@ -127,24 +125,3 @@ The historical `scheduled_count` and `success_count` series cannot be reconstruc
 - Configurable auto-refresh that automatically pauses when you interact with the UI to prevent state loss.
 - Monitor recurring task schedule, last run time, next run time, and latest status from a dedicated dashboard tab.
 
-## Releasing
-
-Build the gem locally before publishing:
-
-```bash
-gem build solid_queue_lite.gemspec
-```
-
-Publish to RubyGems:
-
-```bash
-gem push solid_queue_lite-0.1.0.gem
-```
-
-Typical release flow:
-
-1. Update `lib/solid_queue_lite/version.rb`.
-2. Update `CHANGELOG.md`.
-3. Commit and tag the release.
-4. Build with `gem build solid_queue_lite.gemspec`.
-5. Push with `gem push <built-gem-file>`.
