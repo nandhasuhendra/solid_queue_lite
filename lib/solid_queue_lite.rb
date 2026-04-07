@@ -1,6 +1,7 @@
 require "rails"
 require "rails/engine"
 require "solid_queue"
+require "solid_queue_lite/install"
 require "solid_queue_lite/version"
 
 module SolidQueueLite

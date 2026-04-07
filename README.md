@@ -16,8 +16,17 @@ Install dependencies, then run the engine migration:
 
 ```bash
 bundle install
-bin/rails railties:install:migrations FROM=solid_queue_lite
+bin/rails solid_queue_lite:install
+```
+
+The installer copies the engine migration into the host app and creates `config/initializers/solid_queue_lite.rb` if it does not already exist.
+
+Run the migration separately, or let the installer do it for you:
+
+```bash
 bin/rails db:migrate
+# or
+bin/rails solid_queue_lite:install MIGRATE=1
 ```
 
 Mount the engine behind your application's own authentication boundary:
@@ -100,11 +109,3 @@ The historical `scheduled_count` and `success_count` series cannot be reconstruc
 - Filter and inspect Ready, In-Progress, Scheduled, and Failed jobs.
 - View job arguments (JSON), full stack traces, and execute individual or bulk retries/discards.
 - Configurable auto-refresh that automatically pauses when you interact with the UI to prevent state loss.
-
-## Scaffold Command
-
-If you want to recreate the original plugin scaffold, the base command is:
-
-```bash
-rails plugin new solid_queue_lite --mountable --skip-asset-pipeline --skip-test --skip-system-test --skip-hotwire --skip-javascript
-```
