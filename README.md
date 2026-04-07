@@ -2,6 +2,8 @@
 
 A minimal, zero-build web interface for [Solid Queue](https://github.com/rails/solid_queue).
 
+[![Gem Version](https://badge.fury.io/rb/solid_queue_lite.svg)](https://rubygems.org/gems/solid_queue_lite)
+
 The official `mission_control-jobs` engine is great, but it brings along Turbo, Stimulus, and expects a standard Rails asset pipeline. If you run an API-only app, use a modern JS framework, or just want to avoid frontend dependencies in your infrastructure tooling, Solid Queue Lite provides the same operational visibility without the build-step baggage.
 
 ## Installation
@@ -39,6 +41,12 @@ end
 ```
 
 The engine root renders the dashboard at `/ops/jobs`, and the jobs index is available at `/ops/jobs/jobs`.
+
+## Requirements
+
+- Ruby 3.1+
+- Rails 7.1+
+- Solid Queue 1.x
 
 ## Host Configuration
 
@@ -109,3 +117,26 @@ The historical `scheduled_count` and `success_count` series cannot be reconstruc
 - Filter and inspect Ready, In-Progress, Scheduled, and Failed jobs.
 - View job arguments (JSON), full stack traces, and execute individual or bulk retries/discards.
 - Configurable auto-refresh that automatically pauses when you interact with the UI to prevent state loss.
+- Monitor recurring task schedule, last run time, next run time, and latest status from a dedicated dashboard tab.
+
+## Releasing
+
+Build the gem locally before publishing:
+
+```bash
+gem build solid_queue_lite.gemspec
+```
+
+Publish to RubyGems:
+
+```bash
+gem push solid_queue_lite-0.1.0.gem
+```
+
+Typical release flow:
+
+1. Update `lib/solid_queue_lite/version.rb`.
+2. Update `CHANGELOG.md`.
+3. Commit and tag the release.
+4. Build with `gem build solid_queue_lite.gemspec`.
+5. Push with `gem push <built-gem-file>`.
