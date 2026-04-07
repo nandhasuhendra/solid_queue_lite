@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solid Queue Dashboard</title>
+
+  <!-- Zero-Build Dependencies via CDN as per PRD -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/chartist.js/latest/chartist.min.css">
+
+  <style>
+    /* Minimal utility classes to supplement Pico's classless nature */
+    :root {
+      /* Adjusted to a consistent professional indigo palette */
+      --sq-primary: #4f46e5;
+      --sq-success: #10b981;
+      --sq-danger: #ef4444;
+      --sq-warning: #f59e0b;
+
+      /* Apply consistent color palette globally across Pico */
+      --pico-primary: var(--sq-primary);
+      --pico-primary-background: var(--sq-primary);
+      --pico-primary-border: var(--sq-primary);
+      --pico-primary-hover: #4338ca;
+      --pico-primary-hover-background: #4338ca;
+      --pico-primary-hover-border: #4338ca;
+      --pico-primary-focus: rgba(79, 70, 229, 0.25);
+
+      /* Remove rounded edges for a sharper, flat component design */
+      --pico-border-radius: 0;
+    }
+
+    /* Flatten out articles/cards to remove bulky aesthetics */
+    article {
+      box-shadow: none !important;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0 !important;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+
+    .status-active {
+      background-color: var(--sq-success);
+    }
+
+    .status-stale {
+      background-color: var(--sq-warning);
+    }
+
+    .status-dead {
+      background-color: var(--sq-danger);
+    }
+
+    .ct-series-a .ct-line,
+    .ct-series-a .ct-point {
+      stroke: var(--sq-primary);
+    }
+
+    .ct-series-b .ct-line,
+    .ct-series-b .ct-point {
+      stroke: var(--sq-danger);
+    }
+
+    .ct-chart {
+      height: 220px;
+      margin-top: 1rem;
+    }
+
+    .filter-nav {
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+    }
+
+    .filter-nav a {
+      cursor: pointer;
+      padding: 0.5rem 1rem;
+      display: inline-block;
+      border-bottom: 2px solid transparent;
+      color: var(--pico-muted-color);
+      text-decoration: none;
+    }
+
+    .filter-nav a.active {
+      border-bottom-color: var(--sq-primary);
+      color: var(--pico-h1-color);
+      font-weight: bold;
+    }
+
+    /* Expand/Collapse Job Row Styles */
+    .chevron {
+      transition: transform 0.2s ease;
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      vertical-align: text-bottom;
+      margin-right: 4px;
+    }
+
+    .chevron.expanded {
+      transform: rotate(90deg);
+    }
+
+    .job-row {
+      cursor: pointer;
+      transition: background-color 0.1s ease;
+    }
+
+    .job-row:hover {
+      background-color: rgba(128, 128, 128, 0.05);
+    }
+
+    .job-detail-row td {
+      padding: 0;
+      border-bottom: none;
+    }
+
+    .job-detail-content {
+      padding: 1.5rem;
+      background: rgba(128, 128, 128, 0.02);
+      border-left: 3px solid var(--sq-primary);
+      margin: 0 0 1rem 0;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+    }
+
+    .job-detail-content pre {
+      margin: 0;
+      padding: 1rem;
+      background: var(--pico-code-background-color);
+      border: 1px solid var(--pico-muted-border-color);
+      font-size: 0.85rem;
+    }
+
+    .actions-col {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .actions-col button {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      margin: 0;
+      width: auto;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    /* Process Cards Grid */
+    .process-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .process-card {
+      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .process-card header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+      background: rgba(128, 128, 128, 0.02);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0;
+    }
+
+    .process-card ul {
+      margin: 0;
+      padding: 1rem;
+      list-style: none;
+      font-size: 0.9rem;
+      flex-grow: 1;
+    }
+
+    .process-card ul li {
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .process-card ul li:last-child {
+      margin-bottom: 0;
+    }
+
+    .process-card footer {
+      padding: 0.75rem 1rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      background: rgba(128, 128, 128, 0.02);
+      margin-top: 0;
+    }
+
+    .queue-badge {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      background: var(--pico-secondary-background);
+      color: var(--pico-secondary-inverse);
+      text-decoration: none;
+      display: inline-block;
+      margin: 0.1rem 0.2rem 0.1rem 0;
+      border: 1px solid var(--pico-secondary-border);
+      transition: filter 0.1s ease;
+    }
+
+    .queue-badge:hover {
+      filter: brightness(1.1);
+      color: var(--pico-secondary-inverse);
+    }
+  </style>
+
+  <script>
+    // Alpine.js Component Logic
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('dashboardState', () => ({
+        tab: 'pulse', // pulse | jobs | processes
+        jobsFilter: 'failed',
+        timeRange: '24h',
+        refreshInterval: '10',
+        selectedQueue: null, // Track currently viewed queue
+
+        init() {
+          // Initialize charts once DOM is ready and Pulse tab is active
+          this.$watch('tab', (value) => {
+            if (value === 'pulse') {
+              setTimeout(() => this.renderCharts(), 50);
+            }
+          });
+
+          // Initial render
+          setTimeout(() => this.renderCharts(), 100);
+        },
+
+        renderCharts() {
+          // Mock data for Queue Size
+          new Chartist.Line('#chart-queue-size', {
+            labels: ['12am', '4am', '8am', '12pm', '4pm', '8pm'],
+            series: [
+              [120, 150, 400, 300, 800, 200]
+            ]
+          }, {
+            low: 0,
+            showArea: true,
+            lineSmooth: Chartist.Interpolation.cardinal({ tension: 0.2 }),
+            axisY: { onlyInteger: true }
+          });
+
+          // Mock data for Latency
+          new Chartist.Line('#chart-latency', {
+            labels: ['12am', '4am', '8am', '12pm', '4pm', '8pm'],
+            series: [
+              [45, 50, 120, 142, 300, 80] // Latency spikes under load
+            ]
+          }, {
+            low: 0,
+            showArea: true,
+            lineSmooth: Chartist.Interpolation.step(),
+          });
+        }
+      }));
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
+</head>
+
+<body x-data="dashboardState()">
+
+  <!-- Header & Navigation -->
+  <header class="container" style="padding-top: 2rem; padding-bottom: 1rem;">
+    <nav>
+      <ul>
+        <li>
+          <hgroup>
+            <h1>Solid Queue</h1>
+            <p>Production Telemetry & Operations</p>
+          </hgroup>
+        </li>
+      </ul>
+      <ul>
+        <li>
+          <select x-model="refreshInterval" aria-label="Auto-refresh" style="width: auto; padding-right: 2rem;">
+            <option value="off">Auto-Refresh: Off</option>
+            <option value="5">Refresh: 5s</option>
+            <option value="10">Refresh: 10s</option>
+            <option value="30">Refresh: 30s</option>
+          </select>
+        </li>
+      </ul>
+    </nav>
+    <nav class="filter-nav" style="margin-top: 1rem;">
+      <a :class="{ 'active': tab === 'pulse' }" @click="tab = 'pulse'">Pulse (Telemetry)</a>
+      <a :class="{ 'active': tab === 'jobs' }" @click="tab = 'jobs'">Jobs</a>
+      <a :class="{ 'active': tab === 'processes' }" @click="tab = 'processes'">Processes</a>
+    </nav>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="container">
+
+    <!-- TAB 1: PULSE (TELEMETRY) -->
+    <div x-show="tab === 'pulse'" style="display: none;">
+      <!-- KPIs -->
+      <div class="grid">
+        <article>
+          <header><strong>Ready Jobs</strong></header>
+          <h2 style="margin-bottom: 0;">1,204</h2>
+          <small class="status-active status-dot"></small><small>Normal operating threshold</small>
+        </article>
+        <article>
+          <header><strong>Avg Latency (1h)</strong></header>
+          <h2 style="margin-bottom: 0;">142ms</h2>
+          <small class="status-active status-dot"></small><small>Below 500ms target</small>
+        </article>
+        <article>
+          <header><strong>Error Rate (24h)</strong></header>
+          <h2 style="margin-bottom: 0;">0.4%</h2>
+          <small class="status-warning status-dot"></small><small>Slight elevation in default queue</small>
+        </article>
+      </div>
+
+      <!-- Time Range Toggle -->
+      <div class="toolbar" style="margin-top: 2rem;">
+        <h3>Queue Metrics</h3>
+        <fieldset role="group" style="margin: 0;">
+          <button class="outline" :class="{'secondary': timeRange !== '1h'}" @click="timeRange = '1h'">1h</button>
+          <button class="outline" :class="{'secondary': timeRange !== '6h'}" @click="timeRange = '6h'">6h</button>
+          <button class="outline" :class="{'secondary': timeRange !== '24h'}" @click="timeRange = '24h'">24h</button>
+        </fieldset>
+      </div>
+
+      <!-- Charts -->
+      <div class="grid">
+        <article>
+          <header><strong>Queue Size (Ready vs Scheduled)</strong></header>
+          <div id="chart-queue-size" class="ct-chart"></div>
+        </article>
+        <article>
+          <header><strong>Execution Latency (ms)</strong></header>
+          <div id="chart-latency" class="ct-chart"></div>
+        </article>
+      </div>
+    </div>
+
+    <!-- TAB 2: JOBS -->
+    <div x-show="tab === 'jobs'" style="display: none;">
+
+      <!-- Queue Index View -->
+      <div x-show="!selectedQueue">
+        <div class="toolbar">
+          <h3 style="margin: 0;">Queues</h3>
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <input type="search" placeholder="Filter queues..." style="margin: 0; width: 250px;">
+          </div>
+        </div>
+
+        <figure>
+          <table role="grid">
+            <thead>
+              <tr>
+                <th scope="col">Queue Name</th>
+                <th scope="col">Ready</th>
+                <th scope="col">In-Progress</th>
+                <th scope="col">Failed</th>
+                <th scope="col">Total Jobs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="#" @click.prevent="selectedQueue = 'webhooks'"
+                    style="text-decoration: none;"><strong>webhooks</strong></a></td>
+                <td>12</td>
+                <td>2</td>
+                <td><span style="color: var(--sq-danger);">1</span></td>
+                <td>15</td>
+              </tr>
+              <tr>
+                <td><a href="#" @click.prevent="selectedQueue = 'default'"
+                    style="text-decoration: none;"><strong>default</strong></a></td>
+                <td>1,150</td>
+                <td>45</td>
+                <td><span style="color: var(--sq-danger);">14</span></td>
+                <td>1,209</td>
+              </tr>
+              <tr>
+                <td><a href="#" @click.prevent="selectedQueue = 'low_priority'"
+                    style="text-decoration: none;"><strong>low_priority</strong></a></td>
+                <td>42</td>
+                <td>0</td>
+                <td><span style="color: var(--sq-danger);">27</span></td>
+                <td>69</td>
+              </tr>
+            </tbody>
+          </table>
+        </figure>
+      </div>
+
+      <!-- Queue Detail View (Drill-down) -->
+      <div x-show="selectedQueue" style="display: none;">
+
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb" style="margin-bottom: 1.5rem;">
+          <ul>
+            <li><a href="#" @click.prevent="selectedQueue = null" class="secondary">All Queues</a></li>
+            <li><strong x-text="selectedQueue"></strong></li>
+          </ul>
+        </nav>
+
+        <nav class="filter-nav">
+          <a :class="{ 'active': jobsFilter === 'failed' }" @click="jobsFilter = 'failed'">Failed <span
+              class="contrast tag">(42)</span></a>
+          <a :class="{ 'active': jobsFilter === 'in_progress' }" @click="jobsFilter = 'in_progress'">In-Progress</a>
+          <a :class="{ 'active': jobsFilter === 'ready' }" @click="jobsFilter = 'ready'">Ready</a>
+          <a :class="{ 'active': jobsFilter === 'scheduled' }" @click="jobsFilter = 'scheduled'">Scheduled</a>
+          <a :class="{ 'active': jobsFilter === 'recurring' }" @click="jobsFilter = 'recurring'">Recurring</a>
+        </nav>
+
+        <div class="toolbar">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <input type="search" placeholder="Filter by Class..." style="margin: 0; width: 250px;">
+            <small class="pico-color-muted">Approx. 42 results (Metadata count)</small>
+          </div>
+          <div class="actions-col" x-show="jobsFilter === 'failed'">
+            <button class="secondary outline" @click="alert('Mock: Bulk Discard Triggered')">Discard All</button>
+            <button @click="alert('Mock: Bulk Retry Triggered')">Retry All</button>
+          </div>
+        </div>
+
+        <figure style="margin: 0;">
+          <table role="grid">
+            <thead>
+              <tr>
+                <th scope="col" style="width: 40px; padding-left: 1rem;"><input type="checkbox" aria-label="Select all">
+                </th>
+                <th scope="col">Job ID</th>
+                <th scope="col">Class</th>
+                <th scope="col">Error / Status</th>
+                <th scope="col">Created At</th>
+                <th scope="col" x-show="jobsFilter === 'failed'">Actions</th>
+              </tr>
+            </thead>
+
+            <!-- Replace single tbody with multiple tbodys to scope Alpine state per row -->
+            <tbody x-data="{ expanded: false, showMetadata: false }">
+              <tr class="job-row" @click="expanded = !expanded">
+                <td style="padding-left: 1rem;" @click.stop><input type="checkbox"></td>
+                <td>
+                  <svg class="chevron" :class="{'expanded': expanded}" xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                  <code>9f8d7a1b</code>
+                </td>
+                <td><strong>SendWebhookJob</strong></td>
+                <td><span style="color: var(--sq-danger);">Net::ReadTimeout</span></td>
+                <td><small>2 mins ago</small></td>
+                <td class="actions-col" x-show="jobsFilter === 'failed'" @click.stop>
+                  <button class="outline" @click="alert('Retrying job...')">Retry</button>
+                  <button class="outline secondary" @click="alert('Discarding job...')">Discard</button>
+                </td>
+              </tr>
+              <tr x-show="expanded" class="job-detail-row" x-transition>
+                <td colspan="6">
+                  <div class="job-detail-content">
+                    <div style="margin-bottom: 1.5rem;">
+                      <strong>Execution Details</strong>
+                      <ul style="margin-top: 0.5rem; margin-bottom: 0; font-size: 0.9rem;">
+                        <li><strong>Enqueued At:</strong> 2026-04-07 08:12:45 UTC</li>
+                        <li><strong>Failed At:</strong> 2026-04-07 08:14:02 UTC</li>
+                        <li><strong>Retries:</strong> 4 / 10</li>
+                        <li><strong>Queue:</strong> webhooks</li>
+                        <li><strong>Priority:</strong> 1</li>
+                      </ul>
+                    </div>
+
+                    <div style="margin-bottom: 1.5rem;">
+                      <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <strong>Job Payload</strong>
+                        <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;"
+                          x-text="showMetadata ? '- Hide Metadata' : '+ Show Metadata'"></a>
+                      </div>
+                      <pre style="margin-top: 0;"><code>{
+  "endpoint": "https://api.external.com/v1/sync",
+  "payload": {
+    "user_id": 1042,
+    "event_type": "subscription.created"
+  },
+  "attempt": 4
+}</code></pre>
+
+                      <div x-show="showMetadata" style="display: none; margin-top: 1rem;" x-transition>
+                        <strong>ActiveJob Metadata</strong>
+                        <pre style="margin-top: 0.5rem;"><code>{
+  "job_class": "SendWebhookJob",
+  "job_id": "70923b19-61da-4589-a292-6f68c34c4424",
+  "provider_job_id": "9f8d7a1b",
+  "queue_name": "webhooks",
+  "priority": 1,
+  "executions": 4,
+  "exception_executions": {
+    "Net::ReadTimeout": 4
+  },
+  "locale": "en",
+  "timezone": "UTC",
+  "enqueued_at": "2026-04-07T08:12:45Z"
+}</code></pre>
+                      </div>
+                    </div>
+
+                    <div>
+                      <strong style="color: var(--sq-danger);">Exception Backtrace</strong>
+                      <pre style="margin-top: 0.5rem;"><code style="color: var(--sq-danger);">Net::ReadTimeout: Net::ReadTimeout
+  /usr/local/lib/ruby/3.3.0/net/protocol.rb:219:in `rbuf_fill'
+  /usr/local/lib/ruby/3.3.0/net/protocol.rb:193:in `readuntil'
+  /usr/local/lib/ruby/3.3.0/net/http/response.rb:42:in `read_status_line'</code></pre>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+
+            <tbody x-data="{ expanded: false, showMetadata: false }">
+              <tr class="job-row" @click="expanded = !expanded">
+                <td style="padding-left: 1rem;" @click.stop><input type="checkbox"></td>
+                <td>
+                  <svg class="chevron" :class="{'expanded': expanded}" xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                  <code>3c2b1a9f</code>
+                </td>
+                <td><strong>ProcessImageJob</strong></td>
+                <td><span style="color: var(--sq-danger);">ActiveStorage::FileNotFound</span></td>
+                <td><small>15 mins ago</small></td>
+                <td class="actions-col" x-show="jobsFilter === 'failed'" @click.stop>
+                  <button class="outline">Retry</button>
+                  <button class="outline secondary">Discard</button>
+                </td>
+              </tr>
+              <tr x-show="expanded" class="job-detail-row" x-transition>
+                <td colspan="6">
+                  <div class="job-detail-content">
+                    <div style="margin-bottom: 1.5rem;">
+                      <strong>Execution Details</strong>
+                      <ul style="margin-top: 0.5rem; margin-bottom: 0; font-size: 0.9rem;">
+                        <li><strong>Enqueued At:</strong> 2026-04-07 08:00:10 UTC</li>
+                        <li><strong>Failed At:</strong> 2026-04-07 08:00:12 UTC</li>
+                        <li><strong>Retries:</strong> 1 / 3</li>
+                        <li><strong>Queue:</strong> default</li>
+                      </ul>
+                    </div>
+
+                    <div style="margin-bottom: 1.5rem;">
+                      <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <strong>Job Payload</strong>
+                        <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;"
+                          x-text="showMetadata ? '- Hide Metadata' : '+ Show Metadata'"></a>
+                      </div>
+                      <pre style="margin-top: 0;"><code>{
+  "blob_id": 98821,
+  "transformations": ["resize_to_limit", [1024, 1024]]
+}</code></pre>
+
+                      <div x-show="showMetadata" style="display: none; margin-top: 1rem;" x-transition>
+                        <strong>ActiveJob Metadata</strong>
+                        <pre style="margin-top: 0.5rem;"><code>{
+  "job_class": "ProcessImageJob",
+  "job_id": "c19b33a5-83e8-4673-a212-789a8f4c22b1",
+  "provider_job_id": "3c2b1a9f",
+  "queue_name": "default",
+  "priority": null,
+  "executions": 1,
+  "exception_executions": {},
+  "locale": "en",
+  "timezone": "UTC",
+  "enqueued_at": "2026-04-07T08:00:10Z"
+}</code></pre>
+                      </div>
+                    </div>
+
+                    <div>
+                      <strong style="color: var(--sq-danger);">Exception Backtrace</strong>
+                      <pre style="margin-top: 0.5rem;"><code style="color: var(--sq-danger);">ActiveStorage::FileNotFound: ActiveStorage::FileNotFound
+  /usr/local/lib/ruby/gems/3.3.0/gems/activestorage-7.1.3/lib/active_storage/service/disk_service.rb:58:in `download'
+  /app/app/jobs/process_image_job.rb:14:in `perform'</code></pre>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </figure>
+
+        <!-- Pagination Mock -->
+        <nav aria-label="Pagination" style="margin-top: 1rem;">
+          <ul>
+            <li><button class="outline secondary" disabled>Prev</button></li>
+            <li><button class="outline secondary">Next</button></li>
+          </ul>
+        </nav>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: PROCESSES -->
+    <div x-show="tab === 'processes'" style="display: none;">
+      <div class="toolbar">
+        <h3 style="margin: 0;">Active Topology</h3>
+        <button class="outline secondary" @click="alert('Executing SolidQueue::Process.prune')">Prune Dead
+          Processes</button>
+      </div>
+
+      <div class="process-grid">
+
+        <!-- Process Card 1 -->
+        <article class="process-card" x-data="{ showMetadata: false }">
+          <header>
+            <div>
+              <span class="status-dot status-active" title="Active"></span>
+              <strong>Worker</strong> <small class="pico-color-muted">(4 threads)</small>
+            </div>
+            <code>PID: 10426</code>
+          </header>
+          <ul>
+            <li><span class="pico-color-muted">Hostname</span> <strong>worker-node-01</strong></li>
+            <li><span class="pico-color-muted">Heartbeat</span> <strong>Just now</strong></li>
+          </ul>
+          <div style="padding: 0 1rem 1rem 1rem;">
+            <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;"
+              x-text="showMetadata ? '- Hide Config' : '+ Show Config'"></a>
+            <div x-show="showMetadata" style="display: none; margin-top: 0.5rem;" x-transition>
+              <pre style="margin: 0; padding: 0.75rem; font-size: 0.75rem;"><code>{
+  "polling_interval": 0.1,
+  "queues": "default, webhooks",
+  "thread_pool_size": 4
+}</code></pre>
+            </div>
+          </div>
+          <footer>
+            <div style="font-size: 0.8rem; margin-bottom: 0.5rem; color: var(--pico-muted-color);">Listening to Queues:
+            </div>
+            <div>
+              <a href="#" @click.prevent="tab = 'jobs'; selectedQueue = 'default'" class="queue-badge">default</a>
+              <a href="#" @click.prevent="tab = 'jobs'; selectedQueue = 'webhooks'" class="queue-badge">webhooks</a>
+            </div>
+          </footer>
+        </article>
+
+        <!-- Process Card 2 (Supervisor - No Config Metadata) -->
+        <article class="process-card">
+          <header>
+            <div>
+              <span class="status-dot status-active" title="Active"></span>
+              <strong>Supervisor</strong>
+            </div>
+            <code>PID: 10425</code>
+          </header>
+          <ul>
+            <li><span class="pico-color-muted">Hostname</span> <strong>worker-node-01</strong></li>
+            <li><span class="pico-color-muted">Heartbeat</span> <strong>Just now</strong></li>
+          </ul>
+          <footer>
+            <div style="font-size: 0.8rem; margin-bottom: 0.5rem; color: var(--pico-muted-color);">Listening to Queues:
+            </div>
+            <div>
+              <span class="pico-color-muted" style="font-size: 0.8rem;"><em>System Process (Orchestrator)</em></span>
+            </div>
+          </footer>
+        </article>
+
+        <!-- Process Card 3 -->
+        <article class="process-card" style="border-color: var(--sq-warning);" x-data="{ showMetadata: false }">
+          <header style="background: rgba(245, 158, 11, 0.05);">
+            <div>
+              <span class="status-dot status-stale" title="Stale"></span>
+              <strong>Dispatcher</strong>
+            </div>
+            <code>PID: 88312</code>
+          </header>
+          <ul>
+            <li><span class="pico-color-muted">Hostname</span> <strong>worker-node-02</strong></li>
+            <li><span class="pico-color-muted">Heartbeat</span> <strong style="color: var(--sq-warning);">4 mins
+                ago</strong></li>
+          </ul>
+          <div style="padding: 0 1rem 1rem 1rem;">
+            <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;"
+              x-text="showMetadata ? '- Hide Config' : '+ Show Config'"></a>
+            <div x-show="showMetadata" style="display: none; margin-top: 0.5rem;" x-transition>
+              <pre style="margin: 0; padding: 0.75rem; font-size: 0.75rem;"><code>{
+  "polling_interval": 1,
+  "batch_size": 500,
+  "concurrency_maintenance_interval": 600
+}</code></pre>
+            </div>
+          </div>
+          <footer>
+            <div style="font-size: 0.8rem; margin-bottom: 0.5rem; color: var(--pico-muted-color);">Listening to Queues:
+            </div>
+            <div>
+              <a href="#" @click.prevent="tab = 'jobs'; selectedQueue = 'low_priority'"
+                class="queue-badge">low_priority</a>
+            </div>
+          </footer>
+        </article>
+
+        <!-- Process Card 4 -->
+        <article class="process-card" style="border-color: var(--sq-danger); opacity: 0.8;"
+          x-data="{ showMetadata: false }">
+          <header style="background: rgba(239, 68, 68, 0.05);">
+            <div>
+              <span class="status-dot status-dead" title="Dead"></span>
+              <strong>Worker</strong> <small class="pico-color-muted">(2 threads)</small>
+            </div>
+            <code>PID: 77210</code>
+          </header>
+          <ul>
+            <li><span class="pico-color-muted">Hostname</span> <strong>worker-node-03</strong></li>
+            <li><span class="pico-color-muted">Heartbeat</span> <strong style="color: var(--sq-danger);">2 hours
+                ago</strong></li>
+          </ul>
+          <div style="padding: 0 1rem 1rem 1rem;">
+            <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;"
+              x-text="showMetadata ? '- Hide Config' : '+ Show Config'"></a>
+            <div x-show="showMetadata" style="display: none; margin-top: 0.5rem;" x-transition>
+              <pre style="margin: 0; padding: 0.75rem; font-size: 0.75rem;"><code>{
+  "polling_interval": 0.1,
+  "queues": "low_priority",
+  "thread_pool_size": 2
+}</code></pre>
+            </div>
+          </div>
+          <footer>
+            <div style="font-size: 0.8rem; margin-bottom: 0.5rem; color: var(--pico-muted-color);">Listening to Queues:
+            </div>
+            <div>
+              <a href="#" @click.prevent="tab = 'jobs'; selectedQueue = 'low_priority'"
+                class="queue-badge">low_priority</a>
+            </div>
+          </footer>
+        </article>
+
+      </div>
+    </div>
+
+  </main>
+</body>
+
+</html>

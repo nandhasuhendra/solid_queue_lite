@@ -8,7 +8,8 @@ module SolidQueueLite
         state_key: state_key,
         page: requested_page,
         per_page: requested_per_page,
-        queue_name: params[:queue_name]
+        queue_name: params[:queue_name],
+        include_details: true
       )
 
       @jobs = data[:jobs]
@@ -18,7 +19,6 @@ module SolidQueueLite
       @pagination = data[:pagination]
 
       respond_to do |format|
-        format.html
         format.json do
           render json: {
             jobs: @jobs,
@@ -35,7 +35,6 @@ module SolidQueueLite
       @job = SolidQueueLite::Jobs.find(params[:id])
 
       respond_to do |format|
-        format.html
         format.json { render json: SolidQueueLite::Jobs.serialize(@job) }
       end
     end
@@ -44,7 +43,6 @@ module SolidQueueLite
       retried_count = SolidQueueLite::Jobs.bulk_retry!(job_ids: params[:job_ids], state_key: params.fetch(:state, "failed"))
 
       respond_to do |format|
-        format.html { redirect_to jobs_path(jobs_redirect_params), notice: "Retried #{retried_count} failed job(s)" }
         format.json { render json: { retried: retried_count } }
       end
     end
@@ -53,7 +51,6 @@ module SolidQueueLite
       discarded_count = SolidQueueLite::Jobs.bulk_discard!(job_ids: params[:job_ids], state_key: params.fetch(:state, requested_state_key))
 
       respond_to do |format|
-        format.html { redirect_to jobs_path(jobs_redirect_params), notice: "Discarded #{discarded_count} job(s)" }
         format.json { render json: { discarded: discarded_count } }
       end
     rescue ::SolidQueue::Execution::UndiscardableError => error
@@ -64,7 +61,6 @@ module SolidQueueLite
       job = SolidQueueLite::Jobs.retry!(params[:id])
 
       respond_to do |format|
-        format.html { redirect_to jobs_path(jobs_redirect_params), notice: "Job #{job.id} retried" }
         format.json do
           render json: {
             id: job.id,
@@ -79,7 +75,6 @@ module SolidQueueLite
       job, previous_state = SolidQueueLite::Jobs.discard!(params[:id])
 
       respond_to do |format|
-        format.html { redirect_to jobs_path(jobs_redirect_params(default_state: previous_state&.to_s || "ready")), notice: "Job #{job.id} discarded" }
         format.json do
           render json: {
             id: job.id,
@@ -113,16 +108,20 @@ module SolidQueueLite
         SolidQueueLite::Jobs.jobs_redirect_params(params, default_state: default_state)
       end
 
+      def redirect_target(default_state: "failed")
+        return params[:return_to] if params[:return_to].to_s.start_with?("/")
+
+        jobs_path(jobs_redirect_params(default_state: default_state))
+      end
+
       def render_not_found
         respond_to do |format|
-          format.html { redirect_to jobs_path, alert: "Job not found" }
           format.json { render json: { error: "Not found" }, status: :not_found }
         end
       end
 
       def render_unprocessable_entity(error)
         respond_to do |format|
-          format.html { redirect_to jobs_path(state: params[:state]), alert: error.message }
           format.json { render json: { error: error.message }, status: :unprocessable_entity }
         end
       end

@@ -39,12 +39,13 @@ module SolidQueueLite
         selected_range: selected_range,
         stats: stats,
         latest_stat: stats.last,
-        current_ready_count: SolidQueueLite::ApproximateCounter.count(SolidQueueLite.apply_tenant_scope(::SolidQueue::ReadyExecution.all)),
-        current_scheduled_count: SolidQueueLite::ApproximateCounter.count(SolidQueueLite.apply_tenant_scope(::SolidQueue::ScheduledExecution.all)),
-        current_failed_count: SolidQueueLite::ApproximateCounter.count(SolidQueueLite.apply_tenant_scope(::SolidQueue::FailedExecution.all)),
+        current_ready_count: exact_count(ready_relation),
+        current_scheduled_count: exact_count(scheduled_relation),
+        current_failed_count: exact_count(current_failed_relation),
         worker_count: ::SolidQueue::Process.where(kind: "Worker").count,
         dispatcher_count: ::SolidQueue::Process.where(kind: "Dispatcher").count,
         stale_process_count: ::SolidQueue::Process.prunable.where(kind: [ "Worker", "Dispatcher" ]).count,
+        recurring_tasks: recurring_task_rows,
         chart_payload: {
           labels: stats.map { |stat| stat.timestamp.strftime("%H:%M") },
           ready_counts: stats.map(&:ready_count),
@@ -62,8 +63,8 @@ module SolidQueueLite
       {
         timestamp: timestamp,
         queue_name: SNAPSHOT_QUEUE_NAME,
-        ready_count: SolidQueueLite::ApproximateCounter.count(ready_relation),
-        scheduled_count: SolidQueueLite::ApproximateCounter.count(scheduled_relation),
+        ready_count: exact_count(ready_relation),
+        scheduled_count: exact_count(scheduled_relation),
         failed_count: recent_failed_relation(window_start).count,
         success_count: successful_job_relation(window_start).count,
         avg_latency: average_latency(recent_claimed_relation(window_start))
@@ -80,6 +81,10 @@ module SolidQueueLite
 
     def recent_failed_relation(window_start)
       SolidQueueLite.apply_tenant_scope(::SolidQueue::FailedExecution.where(created_at: window_start..))
+    end
+
+    def current_failed_relation
+      SolidQueueLite.apply_tenant_scope(::SolidQueue::FailedExecution.all)
     end
 
     def successful_job_relation(window_start)
@@ -113,6 +118,75 @@ module SolidQueueLite
       end
 
       relation.average(expression)&.to_f
+    end
+
+    def exact_count(relation)
+      relation.except(:select, :order).count
+    end
+
+    def recurring_task_rows
+      recurring_tasks.map do |task|
+        latest_execution = recurring_task_executions_for(task).max_by(&:run_at)
+        latest_job = latest_execution&.job
+
+        {
+          key: task.key,
+          description: task.try(:description).presence || task.key.to_s.humanize,
+          queue_name: task.try(:queue_name).presence || "solid_queue_recurring",
+          schedule: task.schedule,
+          class_name: task.try(:class_name).presence || "SolidQueue::RecurringJob",
+          last_run_at: latest_execution&.run_at,
+          next_run_at: safe_next_run_at(task),
+          last_status: recurring_status_for(latest_job)
+        }
+      end.sort_by { |task| task[:key].to_s }
+    rescue StandardError
+      []
+    end
+
+    def recurring_tasks
+      persisted_tasks = if defined?(::SolidQueue::RecurringTask)
+        ::SolidQueue::RecurringTask.static.includes(recurring_executions: :job).to_a
+      else
+        []
+      end
+
+      configured_tasks = begin
+        ::SolidQueue::Configuration.new.send(:recurring_tasks)
+      rescue StandardError
+        []
+      end
+
+      (persisted_tasks + configured_tasks).uniq { |task| task.key }
+    end
+
+    def recurring_task_executions_for(task)
+      if task.respond_to?(:recurring_executions)
+        Array(task.recurring_executions)
+      else
+        []
+      end
+    end
+
+    def safe_next_run_at(task)
+      task.next_time if task.respond_to?(:next_time)
+    rescue StandardError
+      nil
+    end
+
+    def recurring_status_for(job)
+      return "Not yet run" unless job
+
+      case job.status.to_s
+      when "failed"
+        "Failed"
+      when "claimed"
+        "Running"
+      when "ready", "scheduled"
+        "Queued"
+      else
+        job.finished_at.present? ? "Succeeded" : job.status.to_s.humanize
+      end
     end
 
     def normalize_timestamp(timestamp)

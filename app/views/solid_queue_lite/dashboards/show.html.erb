@@ -1,126 +1,573 @@
 <% content_for :head do %>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chartist@0.11.4/dist/chartist.min.css">
+  <style>
+    .dashboard-processes-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    .range-toggle {
+      margin: 0;
+    }
+
+    .range-toggle a[role="button"] {
+      padding: 0.45rem 0.9rem;
+      min-width: 4rem;
+      font-size: 0.95rem;
+    }
+
+    .recurring-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .recurring-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .recurring-card-body {
+      padding: 1rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .recurring-card-value {
+      display: block;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    @media (max-width: 767px) {
+      .dashboard-processes-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+
+      .recurring-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .range-toggle a[role="button"] {
+        padding-left: 0.7rem;
+        padding-right: 0.7rem;
+        min-width: 3.2rem;
+      }
+    }
+  </style>
   <script defer src="https://cdn.jsdelivr.net/npm/chartist@0.11.4/dist/chartist.min.js"></script>
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.data("dashboardState", ({ initialTab, initialQueue, initialJobsFilter }) => ({
+        tab: initialTab,
+        selectedQueue: initialQueue,
+        jobsFilter: initialJobsFilter,
+        queueSearch: "",
+        jobClassFilter: "",
+        renderedCharts: false,
+
+        init() {
+          if (this.tab === "pulse") {
+            this.$nextTick(() => this.renderCharts());
+          }
+
+          this.$watch("tab", (value) => {
+            if (value === "pulse") {
+              this.$nextTick(() => this.renderCharts());
+            }
+          });
+
+          this.$watch("selectedQueue", (value) => {
+            if (!value) {
+              this.jobClassFilter = "";
+            }
+          });
+        },
+
+        renderCharts() {
+          if (this.renderedCharts || typeof Chartist === "undefined") return;
+
+          const payloadNode = document.getElementById("dashboard-chart-data");
+          const queueChartNode = document.getElementById("chart-queue-size");
+          const latencyChartNode = document.getElementById("chart-latency");
+          if (!payloadNode || !queueChartNode || !latencyChartNode) return;
+
+          const payload = JSON.parse(payloadNode.textContent);
+          const latencySeries = payload.avg_latencies.map((seconds) => Math.round((seconds || 0) * 1000));
+
+          new Chartist.Line("#chart-queue-size", {
+            labels: payload.labels,
+            series: [payload.ready_counts, payload.scheduled_counts]
+          }, {
+            low: 0,
+            showArea: true,
+            lineSmooth: Chartist.Interpolation.cardinal({ tension: 0.2 }),
+            axisY: { onlyInteger: true }
+          });
+
+          new Chartist.Line("#chart-latency", {
+            labels: payload.labels,
+            series: [latencySeries]
+          }, {
+            low: 0,
+            showArea: true,
+            lineSmooth: Chartist.Interpolation.step()
+          });
+
+          this.renderedCharts = true;
+        },
+
+        visibleQueue(queueName) {
+          const query = this.queueSearch.trim().toLowerCase();
+          return query.length === 0 || queueName.toLowerCase().includes(query);
+        },
+
+        visibleJob(className) {
+          const query = this.jobClassFilter.trim().toLowerCase();
+          return query.length === 0 || className.toLowerCase().includes(query);
+        }
+      }));
+    });
+  </script>
 <% end %>
 
-<section>
-  <header style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: end; margin-bottom: 1rem;">
-    <div>
-      <h2>Pulse</h2>
-      <p>Historical queue telemetry from the self-pruning stats table.</p>
+<% total_execution_samples = @chart_payload[:success_counts].sum + @chart_payload[:failed_counts].sum %>
+<% error_rate = total_execution_samples.zero? ? 0.0 : ((@chart_payload[:failed_counts].sum.to_f / total_execution_samples) * 100).round(1) %>
+<% avg_latency_ms = @latest_stat&.avg_latency ? (@latest_stat.avg_latency.to_f * 1000).round : nil %>
+<% selected_queue_metrics = @selected_queue_metrics || {} %>
+
+<section x-data="dashboardState({ initialTab: <%= @active_tab.to_json %>, initialQueue: <%= @selected_queue_name.to_json %>, initialJobsFilter: <%= @jobs_selected_state.to_json %> })">
+  <nav class="filter-nav" style="margin-top: 1rem;">
+    <a href="<%= dashboard_return_to(tab: "pulse", queue_name: nil, page: nil) %>"
+       :class="{ 'active': tab === 'pulse' }"
+       @click.prevent="tab = 'pulse'; history.replaceState(null, '', $el.href)">Pulse (Telemetry)</a>
+    <a href="<%= dashboard_return_to(tab: "jobs") %>"
+       :class="{ 'active': tab === 'jobs' }"
+       @click.prevent="tab = 'jobs'; selectedQueue = <%= @selected_queue_name.to_json %>; history.replaceState(null, '', $el.href)">Jobs</a>
+    <a href="<%= dashboard_return_to(tab: "processes") %>"
+       :class="{ 'active': tab === 'processes' }"
+       @click.prevent="tab = 'processes'; history.replaceState(null, '', $el.href)">Processes</a>
+     <a href="<%= dashboard_return_to(tab: "recurring") %>"
+       :class="{ 'active': tab === 'recurring' }"
+       @click.prevent="tab = 'recurring'; history.replaceState(null, '', $el.href)">Recurring</a>
+  </nav>
+
+  <div x-show="tab === 'pulse'" x-cloak>
+    <div class="metric-grid">
+      <article>
+        <header><strong>Ready Jobs</strong></header>
+        <h2 style="margin-bottom: 0;"><%= @current_ready_count %></h2>
+        <small><span class="status-dot status-active"></span>Normal operating threshold</small>
+      </article>
+      <article>
+        <header><strong>Avg Latency (<%= @selected_range %>)</strong></header>
+        <h2 style="margin-bottom: 0;"><%= avg_latency_ms ? "#{avg_latency_ms}ms" : "n/a" %></h2>
+        <small><span class="status-dot status-active"></span><%= avg_latency_ms && avg_latency_ms < 500 ? "Below 500ms target" : "Latency spike under load" %></small>
+      </article>
+      <article>
+        <header><strong>Error Rate (<%= @selected_range %>)</strong></header>
+        <h2 style="margin-bottom: 0;"><%= error_rate %>%</h2>
+        <small><span class="status-dot <%= error_rate >= 1.0 ? "status-warning" : "status-active" %>"></span><%= error_rate >= 1.0 ? "Elevated failure rate detected" : "Slight elevation in default queue" %></small>
+      </article>
     </div>
 
-    <nav aria-label="Time range">
-      <% ["1h", "6h", "24h"].each do |range| %>
-        <% if range == @selected_range %>
-          <strong><%= range %></strong>
-        <% else %>
-          <a href="<%= dashboard_path(range: range) %>"><%= range %></a>
+    <div class="toolbar" style="margin-top: 2rem;">
+      <h3 style="margin: 0;">Queue Metrics</h3>
+      <fieldset role="group" class="range-toggle">
+        <% ["1h", "6h", "24h"].each do |range| %>
+          <a href="<%= dashboard_return_to(tab: "pulse", range: range, page: nil, queue_name: nil) %>"
+             role="button"
+             class="outline <%= "secondary" unless @selected_range == range %>"><%= range %></a>
         <% end %>
-      <% end %>
-    </nav>
-  </header>
+      </fieldset>
+    </div>
 
-  <div class="metric-grid" style="margin-bottom: 1rem;">
-    <article class="panel metric-card">
-      <span class="metric-label">Ready Jobs</span>
-      <strong><%= @current_ready_count %></strong>
-    </article>
+    <% if @stats.empty? %>
+      <article class="empty-state">
+        No telemetry samples are available for the selected time window yet.
+      </article>
+    <% else %>
+      <div class="grid">
+        <article>
+          <header><strong>Queue Size (Ready vs Scheduled)</strong></header>
+          <div id="chart-queue-size" class="ct-chart"></div>
+        </article>
+        <article>
+          <header><strong>Execution Latency (ms)</strong></header>
+          <div id="chart-latency" class="ct-chart"></div>
+        </article>
+      </div>
+      <script type="application/json" id="dashboard-chart-data"><%= raw json_escape(@chart_payload.to_json) %></script>
+    <% end %>
 
-    <article class="panel metric-card">
-      <span class="metric-label">Scheduled Jobs</span>
-      <strong><%= @current_scheduled_count %></strong>
-    </article>
-
-    <article class="panel metric-card">
-      <span class="metric-label">Failed Backlog</span>
-      <strong><%= @current_failed_count %></strong>
-    </article>
-
-    <article class="panel metric-card">
-      <span class="metric-label">Avg Latency</span>
-      <strong><%= @latest_stat&.avg_latency ? "#{@latest_stat.avg_latency.round(2)}s" : "n/a" %></strong>
-    </article>
-
-    <article class="panel metric-card">
-      <span class="metric-label">Workers / Dispatchers</span>
-      <strong><%= @worker_count %> / <%= @dispatcher_count %></strong>
-      <span class="metric-label"><%= @stale_process_count %> stale</span>
-    </article>
   </div>
 
-  <% if @stats.empty? %>
-    <article class="panel empty-state">
-      No telemetry samples are available for the selected time window yet.
-    </article>
-  <% else %>
-    <div class="grid">
-      <article class="panel chart-card">
-        <header>
-          <h3 style="margin-bottom: 0.25rem;">Queue Volume</h3>
-          <p style="margin: 0; color: var(--dashboard-muted);">Ready versus scheduled snapshots.</p>
-        </header>
-        <div id="queue-volume-chart" class="ct-chart" style="height: 260px;"></div>
-      </article>
+  <div x-show="tab === 'jobs'" x-cloak>
+    <% if @selected_queue_name.blank? %>
+      <div class="toolbar">
+        <h3 style="margin: 0;">Queues</h3>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          <input type="search" x-model="queueSearch" placeholder="Filter queues..." style="margin: 0; width: 250px;">
+        </div>
+      </div>
 
-      <article class="panel chart-card">
-        <header>
-          <h3 style="margin-bottom: 0.25rem;">Execution Outcomes</h3>
-          <p style="margin: 0; color: var(--dashboard-muted);">Successful completions versus failures inside each sampling window.</p>
-        </header>
-        <div id="execution-outcomes-chart" class="ct-chart" style="height: 260px;"></div>
-      </article>
+      <% if @queues.empty? %>
+        <article class="empty-state">No queues are currently registered.</article>
+      <% else %>
+        <figure>
+          <table role="grid">
+            <thead>
+              <tr>
+                <th scope="col">Queue Name</th>
+                <th scope="col">Ready</th>
+                <th scope="col">In-Progress</th>
+                <th scope="col">Failed</th>
+                <th scope="col">Total Jobs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% @queues.each do |queue| %>
+                <tr x-show="visibleQueue(<%= queue[:name].to_json %>)">
+                  <td>
+                    <a href="<%= dashboard_return_to(tab: "jobs", queue_name: queue[:name], state: @jobs_selected_state, page: 1, per_page: @jobs_per_page) %>"
+                       style="text-decoration: none;"
+                       @click.prevent="selectedQueue = <%= queue[:name].to_json %>; window.location = $el.href"><strong><%= queue[:name] %></strong></a>
+                  </td>
+                  <td><%= queue[:ready_estimate] %></td>
+                  <td><%= queue[:in_progress_count] %></td>
+                  <td><span style="color: var(--sq-danger);"><%= queue[:failed_count] %></span></td>
+                  <td><%= queue[:total_jobs_count] %></td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </figure>
+      <% end %>
+    <% else %>
+      <div x-data="{ selectedIds: [] }" x-effect="window.dispatchEvent(new CustomEvent('dashboard-pause', { detail: { paused: selectedIds.length > 0 } }))">
+        <nav aria-label="breadcrumb" style="margin-bottom: 1.5rem;">
+          <ul>
+            <li><a href="<%= dashboard_return_to(tab: "jobs", queue_name: nil, page: nil) %>" class="secondary" @click.prevent="selectedQueue = null; window.location = $el.href">All Queues</a></li>
+            <li><strong><%= @selected_queue_name %></strong></li>
+          </ul>
+        </nav>
 
-      <article class="panel chart-card">
-        <header>
-          <h3 style="margin-bottom: 0.25rem;">Latency Trend</h3>
-          <p style="margin: 0; color: var(--dashboard-muted);">Average claim latency over the selected window.</p>
-        </header>
-        <div id="latency-chart" class="ct-chart" style="height: 260px;"></div>
-      </article>
+        <div class="toolbar">
+          <div>
+            <h3 style="margin: 0;"><%= @selected_queue_name %></h3>
+            <small class="muted">Approx. <%= @jobs_pagination[:approximate_total_count] %> jobs in the <%= @jobs_selected_state.humanize %> view.</small>
+          </div>
+          <div class="actions-col">
+            <% if selected_queue_metrics[:paused] %>
+              <form method="post" action="<%= resume_queues_path %>" style="margin: 0;">
+                <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                <button type="submit" class="outline">Resume Queue</button>
+              </form>
+            <% else %>
+              <form method="post" action="<%= pause_queues_path %>" style="margin: 0;">
+                <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                <button type="submit" class="outline secondary">Pause Queue</button>
+              </form>
+            <% end %>
+
+            <form method="post" action="<%= clear_queues_path %>" style="margin: 0;">
+              <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+              <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+              <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+              <button type="submit" class="outline secondary">Clear ready jobs</button>
+            </form>
+          </div>
+        </div>
+
+        <nav class="filter-nav">
+          <% {
+            "failed" => selected_queue_metrics[:failed_count],
+            "in_progress" => selected_queue_metrics[:in_progress_count],
+            "ready" => selected_queue_metrics[:ready_estimate],
+            "scheduled" => selected_queue_metrics[:scheduled_count],
+            "recurring" => selected_queue_metrics[:recurring_count]
+          }.each do |state_key, count| %>
+            <a href="<%= dashboard_return_to(tab: "jobs", state: state_key, page: 1) %>"
+               :class="{ 'active': jobsFilter === <%= state_key.to_json %> }"
+               @click.prevent="jobsFilter = <%= state_key.to_json %>; window.location = $el.href">
+              <%= state_key.humanize %>
+              <% if count.present? %>
+                <span class="muted">(<%= count %>)</span>
+              <% end %>
+            </a>
+          <% end %>
+        </nav>
+
+        <div class="toolbar">
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <input type="search" x-model="jobClassFilter" placeholder="Filter by Class..." style="margin: 0; width: 250px;">
+            <small class="muted">Approx. <%= @jobs_pagination[:approximate_total_count] %> results (Metadata count)</small>
+          </div>
+
+          <div class="actions-col" x-show="jobsFilter === 'failed'" x-cloak>
+            <% if @jobs_selected_state == "failed" %>
+              <form method="post" action="<%= bulk_retry_jobs_path %>" style="margin: 0;" x-on:submit="if (selectedIds.length === 0) { event.preventDefault(); }">
+                <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                <input type="hidden" name="state" value="<%= @jobs_selected_state %>">
+                <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                <input type="hidden" name="page" value="<%= @jobs_pagination[:page] %>">
+                <input type="hidden" name="per_page" value="<%= @jobs_pagination[:per_page] %>">
+                <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                <template x-for="jobId in selectedIds" :key="`retry-${jobId}`">
+                  <input type="hidden" name="job_ids[]" :value="jobId">
+                </template>
+                <button type="submit" :disabled="selectedIds.length === 0">Retry All</button>
+              </form>
+            <% end %>
+
+            <% if ["ready", "scheduled", "failed"].include?(@jobs_selected_state) %>
+              <form method="post" action="<%= bulk_discard_jobs_path %>" style="margin: 0;" x-on:submit="if (selectedIds.length === 0) { event.preventDefault(); }">
+                <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                <input type="hidden" name="state" value="<%= @jobs_selected_state %>">
+                <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                <input type="hidden" name="page" value="<%= @jobs_pagination[:page] %>">
+                <input type="hidden" name="per_page" value="<%= @jobs_pagination[:per_page] %>">
+                <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                <template x-for="jobId in selectedIds" :key="`discard-${jobId}`">
+                  <input type="hidden" name="job_ids[]" :value="jobId">
+                </template>
+                <button type="submit" class="secondary outline" :disabled="selectedIds.length === 0">Discard All</button>
+              </form>
+            <% end %>
+          </div>
+        </div>
+
+        <% if @jobs.empty? %>
+          <article class="empty-state">No jobs matched the current queue and state filter.</article>
+        <% else %>
+          <figure style="margin: 0;">
+            <table role="grid">
+              <thead>
+                <tr>
+                  <th scope="col" style="width: 40px; padding-left: 1rem;"><input type="checkbox" aria-label="Select all" disabled></th>
+                  <th scope="col">Job ID</th>
+                  <th scope="col">Class</th>
+                  <th scope="col">Error / Status</th>
+                  <th scope="col">Created At</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <% @jobs.each do |job| %>
+                <% metadata_payload = {
+                  job_class: job[:class_name],
+                  job_id: job[:active_job_id],
+                  provider_job_id: job[:id],
+                  queue_name: job[:queue_name],
+                  priority: job[:priority],
+                  state: job[:state],
+                  enqueued_at: job[:created_at]
+                }.compact %>
+                <tbody x-data="{ expanded: false, showMetadata: false }" x-show="visibleJob(<%= job[:class_name].to_json %>)">
+                  <tr class="job-row" @click="expanded = !expanded">
+                    <td style="padding-left: 1rem;" @click.stop><input type="checkbox" value="<%= job[:id] %>" x-model="selectedIds"></td>
+                    <td>
+                      <svg class="chevron" :class="{ 'expanded': expanded }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                      </svg>
+                      <code><%= job[:id] %></code>
+                    </td>
+                    <td><strong><%= job[:class_name] %></strong></td>
+                    <td>
+                      <% if job[:failed_execution].present? %>
+                        <span style="color: var(--sq-danger);"><%= job[:failed_execution][:exception_class] %></span>
+                      <% else %>
+                        <span><%= job[:state_label] %></span>
+                      <% end %>
+                    </td>
+                    <td><small><%= dashboard_relative_time(job[:created_at]) %></small></td>
+                    <td class="actions-col" @click.stop>
+                      <% if job[:state] == "failed" %>
+                        <form method="post" action="<%= retry_job_path(job[:id]) %>" style="margin: 0;">
+                          <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                          <input type="hidden" name="state" value="<%= @jobs_selected_state %>">
+                          <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                          <input type="hidden" name="page" value="<%= @jobs_pagination[:page] %>">
+                          <input type="hidden" name="per_page" value="<%= @jobs_pagination[:per_page] %>">
+                          <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                          <button type="submit" class="outline">Retry</button>
+                        </form>
+                      <% end %>
+
+                      <form method="post" action="<%= discard_job_path(job[:id]) %>" style="margin: 0;">
+                        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                        <input type="hidden" name="state" value="<%= @jobs_selected_state %>">
+                        <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+                        <input type="hidden" name="page" value="<%= @jobs_pagination[:page] %>">
+                        <input type="hidden" name="per_page" value="<%= @jobs_pagination[:per_page] %>">
+                        <input type="hidden" name="return_to" value="<%= dashboard_return_to %>">
+                        <button type="submit" class="outline secondary">Discard</button>
+                      </form>
+                    </td>
+                  </tr>
+                  <tr x-show="expanded" class="job-detail-row" x-transition>
+                    <td colspan="6">
+                      <div class="job-detail-content">
+                        <div style="margin-bottom: 1.5rem;">
+                          <strong>Execution Details</strong>
+                          <ul style="margin-top: 0.5rem; margin-bottom: 0; font-size: 0.9rem;">
+                            <li><strong>Enqueued At:</strong> <%= job[:created_at] || "n/a" %></li>
+                            <li><strong>Failed At:</strong> <%= job.dig(:failed_execution, :created_at) || "n/a" %></li>
+                            <li><strong>Priority:</strong> <%= job[:priority] || "n/a" %></li>
+                            <li><strong>Queue:</strong> <%= job[:queue_name] %></li>
+                            <li><strong>State:</strong> <%= job[:state_label] %></li>
+                          </ul>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <strong>Job Payload</strong>
+                            <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;" x-text="showMetadata ? '- Hide Metadata' : '+ Show Metadata'"></a>
+                          </div>
+                          <pre><code><%= JSON.pretty_generate(job[:arguments] || {}) %></code></pre>
+
+                          <div x-show="showMetadata" style="display: none; margin-top: 1rem;" x-transition>
+                            <strong>ActiveJob Metadata</strong>
+                            <pre style="margin-top: 0.5rem;"><code><%= JSON.pretty_generate(metadata_payload) %></code></pre>
+                          </div>
+                        </div>
+
+                        <% if job[:failed_execution].present? %>
+                          <div>
+                            <strong style="color: var(--sq-danger);">Exception Backtrace</strong>
+                            <pre style="margin-top: 0.5rem;"><code style="color: var(--sq-danger);"><%= ["#{job[:failed_execution][:exception_class]}: #{job[:failed_execution][:message]}", *Array(job[:failed_execution][:backtrace])].join("\n") %></code></pre>
+                          </div>
+                        <% end %>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              <% end %>
+            </table>
+          </figure>
+
+          <nav aria-label="Pagination" style="margin-top: 1rem;">
+            <ul>
+              <li>
+                <% if @jobs_pagination[:page] > 1 %>
+                  <a href="<%= dashboard_return_to(tab: "jobs", page: @jobs_pagination[:page] - 1) %>" role="button" class="outline secondary">Prev</a>
+                <% else %>
+                  <button class="outline secondary" disabled>Prev</button>
+                <% end %>
+              </li>
+              <li>
+                <% if @jobs_pagination[:page] < @jobs_pagination[:total_pages] %>
+                  <a href="<%= dashboard_return_to(tab: "jobs", page: @jobs_pagination[:page] + 1) %>" role="button" class="outline secondary">Next</a>
+                <% else %>
+                  <button class="outline secondary" disabled>Next</button>
+                <% end %>
+              </li>
+            </ul>
+          </nav>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <div x-show="tab === 'processes'" x-cloak>
+    <div class="toolbar">
+      <div>
+        <h3 style="margin: 0;">Active Topology</h3>
+        <small class="muted">Heartbeat threshold: <%= @heartbeat[:stale_after_seconds] %> seconds</small>
+      </div>
+      <form method="post" action="<%= prune_processes_path %>" style="margin: 0;">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+        <input type="hidden" name="return_to" value="<%= dashboard_return_to(tab: "processes") %>">
+        <button type="submit" class="outline secondary">Prune Dead Processes</button>
+      </form>
     </div>
 
-    <script type="application/json" id="dashboard-chart-data"><%= raw json_escape(@chart_payload.to_json) %></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        const payloadNode = document.getElementById("dashboard-chart-data");
-        if (!payloadNode || typeof Chartist === "undefined") return;
+    <% if @processes.empty? %>
+      <article class="empty-state">No active Solid Queue processes are currently registered.</article>
+    <% else %>
+      <div class="process-grid dashboard-processes-grid">
+        <% @processes.each do |process| %>
+          <article class="process-card" x-data="{ showMetadata: false }"
+                   style="<%= "border-color: var(--sq-warning);" if process[:status] == "stale" %><%= "border-color: var(--sq-danger); opacity: 0.8;" if process[:status] == "dead" %>">
+            <header style="<%= "background: rgba(245, 158, 11, 0.05);" if process[:status] == "stale" %><%= "background: rgba(239, 68, 68, 0.05);" if process[:status] == "dead" %>">
+              <div>
+                <span class="status-dot <%= process[:status] == "active" ? "status-active" : (process[:status] == "stale" ? "status-stale" : "status-dead") %>"></span>
+                <strong><%= process[:kind] %></strong>
+              </div>
+              <code>PID: <%= process[:pid] %></code>
+            </header>
+            <ul>
+              <li><span class="pico-color-muted">Hostname</span> <strong><%= process[:hostname].presence || "unknown" %></strong></li>
+              <li><span class="pico-color-muted">Heartbeat</span> <strong><%= dashboard_relative_time(process[:last_heartbeat_at]) %></strong></li>
+              <% if process[:supervisor_id].present? %>
+                <li><span class="pico-color-muted">Supervisor</span> <strong><%= process[:supervisor_id] %></strong></li>
+              <% end %>
+            </ul>
+            <% if process[:metadata].present? %>
+              <div style="padding: 0 1rem 1rem 1rem;">
+                <a href="#" @click.prevent="showMetadata = !showMetadata" style="font-size: 0.85rem;" x-text="showMetadata ? '- Hide Config' : '+ Show Config'"></a>
+                <div x-show="showMetadata" style="display: none; margin-top: 0.5rem;" x-transition>
+                  <pre style="padding: 0.75rem; font-size: 0.75rem;"><code><%= JSON.pretty_generate(process[:metadata]) %></code></pre>
+                </div>
+              </div>
+            <% end %>
+            <footer>
+              <div style="font-size: 0.8rem; margin-bottom: 0.5rem; color: var(--pico-muted-color);">Listening to Queues:</div>
+              <div>
+                <% if process[:queue_names].present? %>
+                  <% process[:queue_names].each do |queue_name| %>
+                    <a href="<%= dashboard_return_to(tab: "jobs", queue_name: queue_name, state: "failed", page: 1) %>" class="queue-badge"><%= queue_name %></a>
+                  <% end %>
+                <% else %>
+                  <span class="pico-color-muted" style="font-size: 0.8rem;"><em>System Process</em></span>
+                <% end %>
+              </div>
+            </footer>
+          </article>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
 
-        const payload = JSON.parse(payloadNode.textContent);
-        const labels = payload.labels;
+  <div x-show="tab === 'recurring'" x-cloak>
+    <div class="toolbar">
+      <div>
+        <h3 style="margin: 0;">Recurring Tasks</h3>
+        <small class="muted">Monitor the latest run and status for all configured recurring work.</small>
+      </div>
+    </div>
 
-        new Chartist.Line("#queue-volume-chart", {
-          labels,
-          series: [payload.ready_counts, payload.scheduled_counts]
-        }, {
-          fullWidth: true,
-          chartPadding: { right: 20 },
-          low: 0,
-          showArea: false,
-          axisX: { showGrid: false }
-        });
-
-        new Chartist.Line("#execution-outcomes-chart", {
-          labels,
-          series: [payload.success_counts, payload.failed_counts]
-        }, {
-          fullWidth: true,
-          chartPadding: { right: 20 },
-          low: 0,
-          showArea: false,
-          axisX: { showGrid: false }
-        });
-
-        new Chartist.Bar("#latency-chart", {
-          labels,
-          series: [payload.avg_latencies]
-        }, {
-          fullWidth: true,
-          chartPadding: { right: 20 },
-          low: 0,
-          axisX: { showGrid: false }
-        });
-      });
-    </script>
-  <% end %>
+    <% if @recurring_tasks.blank? %>
+      <article class="empty-state">No recurring tasks are configured or synced yet.</article>
+    <% else %>
+      <div class="recurring-grid">
+        <% @recurring_tasks.each do |task| %>
+          <% status_class = case task[:last_status]
+             when "Failed" then "status-dead"
+             when "Running", "Queued" then "status-warning"
+             else "status-active"
+             end %>
+          <article>
+            <header style="display: flex; justify-content: space-between; gap: 1rem; align-items: center;">
+              <div style="min-width: 0;">
+                <strong class="recurring-card-value"><%= task[:description] %></strong>
+                <div class="muted recurring-card-value"><%= task[:key] %></div>
+              </div>
+              <span class="status-pill"><span class="status-dot <%= status_class %>"></span><%= task[:last_status] %></span>
+            </header>
+            <div class="recurring-card-body">
+              <div><span class="muted">Queue</span><br><strong class="recurring-card-value"><%= task[:queue_name] %></strong></div>
+              <div><span class="muted">Schedule</span><br><strong class="recurring-card-value"><%= task[:schedule] %></strong></div>
+              <div><span class="muted">Class</span><br><strong class="recurring-card-value"><%= task[:class_name] %></strong></div>
+              <div><span class="muted">Last Run</span><br><strong class="recurring-card-value"><%= task[:last_run_at] ? dashboard_relative_time(task[:last_run_at]) : "Never" %></strong></div>
+              <div><span class="muted">Next Run</span><br><strong class="recurring-card-value"><%= task[:next_run_at] ? task[:next_run_at].strftime("%Y-%m-%d %H:%M UTC") : "n/a" %></strong></div>
+            </div>
+          </article>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
 </section>

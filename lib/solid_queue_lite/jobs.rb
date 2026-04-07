@@ -14,20 +14,35 @@ module SolidQueueLite
 
     module_function
 
-    def list(state_key:, page: 1, per_page: DEFAULT_PER_PAGE, queue_name: nil)
+    def list(state_key:, page: 1, per_page: DEFAULT_PER_PAGE, queue_name: nil, include_details: false)
       state = resolve_state(state_key)
       relation = filtered_jobs_relation(state: state, queue_name: queue_name)
       approximate_total = SolidQueueLite::ApproximateCounter.count(relation)
       total_pages = estimated_total_pages(approximate_total, per_page)
 
-      jobs = relation
+      listed_relation = relation
         .reorder(created_at: :desc, id: :desc)
         .limit(per_page)
         .offset((page - 1) * per_page)
-        .pluck(:id, :class_name, :queue_name)
-        .map do |id, class_name, queue_name_value|
-          { id: id, class_name: class_name, queue_name: queue_name_value, state: state.to_s }
-        end
+
+      jobs = if include_details
+        listed_relation
+          .includes(
+            :ready_execution,
+            :claimed_execution,
+            :failed_execution,
+            :scheduled_execution,
+            :blocked_execution,
+            :recurring_execution
+          )
+          .map { |job| serialize_list_job(job) }
+      else
+        listed_relation
+          .pluck(:id, :class_name, :queue_name)
+          .map do |id, class_name, queue_name_value|
+            { id: id, class_name: class_name, queue_name: queue_name_value, state: state.to_s }
+          end
+      end
 
       {
         jobs: jobs,
@@ -103,6 +118,14 @@ module SolidQueueLite
         failed_execution: serialize_failed_execution(job.failed_execution),
         recurring_execution: serialize_recurring_execution(job.recurring_execution)
       }
+    end
+
+    def serialize_list_job(job)
+      serialize(job).merge(
+        state: job.status.to_s,
+        state_label: job.status.to_s.humanize,
+        error_label: job.failed_execution&.exception_class || job.status.to_s.humanize
+      )
     end
 
     def resolve_state(state_key)

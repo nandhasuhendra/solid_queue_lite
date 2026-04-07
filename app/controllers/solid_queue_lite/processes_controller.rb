@@ -7,7 +7,6 @@ module SolidQueueLite
       @queues = data[:queues]
 
       respond_to do |format|
-        format.html
         format.json do
           render json: {
             processes: @processes,
@@ -21,7 +20,6 @@ module SolidQueueLite
       prunable_before = SolidQueueLite::Processes.prune!
 
       respond_to do |format|
-        format.html { redirect_to processes_path, notice: "Pruned approximately #{prunable_before} stale process record(s)" }
         format.json do
           render json: {
             pruned: true,
@@ -30,5 +28,12 @@ module SolidQueueLite
         end
       end
     end
+
+    private
+      def redirect_target
+        return params[:return_to] if params[:return_to].to_s.start_with?("/")
+
+        processes_path
+      end
   end
 end
