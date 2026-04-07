@@ -47,8 +47,14 @@ The engine root renders the dashboard at `/ops/jobs`, and the jobs index is avai
 ## Requirements
 
 - Ruby 3.1+
-- Rails 7.1+
+- Rails 7.1
 - Solid Queue 1.x
+
+If you are using Rails 8, you can install the gem normally without pinning Rails back to 7.x:
+
+```ruby
+gem "solid_queue_lite"
+```
 
 ## Host Configuration
 
