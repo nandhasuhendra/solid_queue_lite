@@ -1,0 +1,155 @@
+<section>
+  <header>
+    <h2>Jobs</h2>
+    <p>Filterable, hard-capped views over Solid Queue states using string-only list queries.</p>
+  </header>
+
+  <form method="get" action="<%= jobs_path %>" class="panel" style="padding: 1rem; margin-bottom: 1rem;">
+    <div class="grid">
+      <label>
+        State
+        <select name="state">
+          <% @state_options.each do |state_option| %>
+            <option value="<%= state_option %>" <%= "selected" if state_option == @selected_state %>><%= state_option.humanize %></option>
+          <% end %>
+        </select>
+      </label>
+
+      <label>
+        Queue
+        <input type="text" name="queue_name" value="<%= @selected_queue_name %>" placeholder="background">
+      </label>
+
+      <label>
+        Per page
+        <select name="per_page">
+          <% [25, 50, 100].each do |size| %>
+            <option value="<%= size %>" <%= "selected" if size == @pagination[:per_page] %>><%= size %></option>
+          <% end %>
+        </select>
+      </label>
+    </div>
+
+    <button type="submit">Apply filters</button>
+  </form>
+
+  <div class="metric-grid" style="margin-bottom: 1rem;">
+    <article class="panel metric-card">
+      <span class="metric-label">Approximate Total</span>
+      <strong><%= @pagination[:approximate_total_count] %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Current Page</span>
+      <strong><%= @pagination[:page] %> / <%= @pagination[:total_pages] %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Selected State</span>
+      <strong><%= @selected_state.humanize %></strong>
+    </article>
+  </div>
+
+  <section class="panel" x-data="{ selectedIds: [] }" x-effect="window.dispatchEvent(new CustomEvent('dashboard-pause', { detail: { paused: selectedIds.length > 0 } }))">
+    <% if @jobs.empty? %>
+      <div class="empty-state">
+        No jobs matched the current filters.
+      </div>
+    <% else %>
+      <div style="padding: 1rem; border-bottom: 1px solid var(--dashboard-line);">
+        <div class="cluster">
+          <% if @selected_state == "failed" %>
+            <form method="post" action="<%= bulk_retry_jobs_path %>" style="margin: 0;" x-on:submit="if (selectedIds.length === 0) { event.preventDefault(); }">
+              <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+              <input type="hidden" name="state" value="<%= @selected_state %>">
+              <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+              <input type="hidden" name="per_page" value="<%= @pagination[:per_page] %>">
+              <input type="hidden" name="page" value="<%= @pagination[:page] %>">
+              <template x-for="jobId in selectedIds" :key="`retry-${jobId}`">
+                <input type="hidden" name="job_ids[]" :value="jobId">
+              </template>
+              <button type="submit" class="secondary" :disabled="selectedIds.length === 0">Bulk retry selected</button>
+            </form>
+          <% end %>
+
+          <% if ["ready", "scheduled", "failed"].include?(@selected_state) %>
+            <form method="post" action="<%= bulk_discard_jobs_path %>" style="margin: 0;" x-on:submit="if (selectedIds.length === 0) { event.preventDefault(); }">
+              <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+              <input type="hidden" name="state" value="<%= @selected_state %>">
+              <input type="hidden" name="queue_name" value="<%= @selected_queue_name %>">
+              <input type="hidden" name="per_page" value="<%= @pagination[:per_page] %>">
+              <input type="hidden" name="page" value="<%= @pagination[:page] %>">
+              <template x-for="jobId in selectedIds" :key="`discard-${jobId}`">
+                <input type="hidden" name="job_ids[]" :value="jobId">
+              </template>
+              <button type="submit" class="contrast" :disabled="selectedIds.length === 0">Bulk discard selected</button>
+            </form>
+          <% end %>
+
+          <span class="metric-label" x-text="selectedIds.length === 0 ? 'Select rows to unlock bulk actions' : `${selectedIds.length} selected`"></span>
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Bulk</th>
+              <th scope="col">ID</th>
+              <th scope="col">Class</th>
+              <th scope="col">Queue</th>
+              <th scope="col">State</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @jobs.each do |job| %>
+              <tr>
+                <td>
+                  <input type="checkbox" value="<%= job[:id] %>" x-model="selectedIds" aria-label="Select job <%= job[:id] %>">
+                </td>
+                <td><code><%= job[:id] %></code></td>
+                <td><%= job[:class_name] %></td>
+                <td><%= job[:queue_name] %></td>
+                <td><%= job[:state].humanize %></td>
+                <td>
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <a href="<%= job_path(job[:id], state: @selected_state, queue_name: @selected_queue_name, per_page: @pagination[:per_page], page: @pagination[:page]) %>">Details</a>
+                    <a href="<%= job_path(job[:id], format: :json) %>">JSON</a>
+
+                    <% if job[:state] == "failed" %>
+                      <form method="post" action="<%= retry_job_path(job[:id], state: @selected_state, queue_name: @selected_queue_name, per_page: @pagination[:per_page], page: @pagination[:page]) %>" style="margin: 0;">
+                        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                        <button type="submit" class="secondary">Retry</button>
+                      </form>
+                    <% end %>
+
+                    <form method="post" action="<%= discard_job_path(job[:id], state: @selected_state, queue_name: @selected_queue_name, per_page: @pagination[:per_page], page: @pagination[:page]) %>" style="margin: 0;">
+                      <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                      <button type="submit" class="contrast">Discard</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+
+      <footer style="padding: 1rem; border-top: 1px solid var(--dashboard-line); display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+        <span x-show="selectedIds.length === 0">Select one or more rows to simulate a bulk action and pause auto-refresh.</span>
+        <strong x-show="selectedIds.length > 0" x-cloak x-text="`${selectedIds.length} row(s) selected · auto-refresh paused`"></strong>
+
+        <nav aria-label="Pagination">
+          <% if @pagination[:page] > 1 %>
+            <a href="<%= jobs_path(state: @selected_state, queue_name: @selected_queue_name, per_page: @pagination[:per_page], page: @pagination[:page] - 1) %>">Previous</a>
+          <% end %>
+
+          <% if @pagination[:page] < @pagination[:total_pages] %>
+            <a href="<%= jobs_path(state: @selected_state, queue_name: @selected_queue_name, per_page: @pagination[:per_page], page: @pagination[:page] + 1) %>">Next</a>
+          <% end %>
+        </nav>
+      </footer>
+    <% end %>
+  </section>
+</section>

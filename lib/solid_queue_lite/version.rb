@@ -1,3 +1,3 @@
-module SoliqQueueLite
+module SolidQueueLite
   VERSION = "0.1.0"
 end

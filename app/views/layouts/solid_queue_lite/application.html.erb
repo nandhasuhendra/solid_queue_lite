@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Solid Queue Lite</title>
+  <%= csrf_meta_tags %>
+  <%= csp_meta_tag %>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+  <style>
+    :root {
+      --pico-font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      --dashboard-ink: #1d2430;
+      --dashboard-muted: #607087;
+      --dashboard-accent: #0e7490;
+      --dashboard-accent-soft: rgba(14, 116, 144, 0.12);
+      --dashboard-surface: rgba(255, 255, 255, 0.8);
+      --dashboard-surface-strong: rgba(255, 255, 255, 0.94);
+      --dashboard-line: rgba(96, 112, 135, 0.18);
+      --dashboard-glow: radial-gradient(circle at top left, rgba(14, 116, 144, 0.18), transparent 35%), radial-gradient(circle at top right, rgba(251, 146, 60, 0.16), transparent 28%), linear-gradient(180deg, #f4f8fb 0%, #eef4f7 100%);
+    }
+
+    [x-cloak] {
+      display: none !important;
+    }
+
+    body {
+      min-height: 100vh;
+      color: var(--dashboard-ink);
+      background: var(--dashboard-glow);
+    }
+
+    main.container {
+      padding-top: 2rem;
+      padding-bottom: 4rem;
+    }
+
+    .shell {
+      border: 1px solid var(--dashboard-line);
+      border-radius: 1.5rem;
+      background: var(--dashboard-surface-strong);
+      box-shadow: 0 18px 60px rgba(29, 36, 48, 0.08);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+    }
+
+    .shell-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--dashboard-line);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 252, 253, 0.88));
+    }
+
+    .shell-title {
+      margin: 0;
+      font-size: clamp(1.4rem, 3vw, 2rem);
+    }
+
+    .shell-subtitle {
+      margin: 0.35rem 0 0;
+      color: var(--dashboard-muted);
+    }
+
+    .shell-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: 999px;
+      background: var(--dashboard-accent-soft);
+      color: var(--dashboard-accent);
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .page-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      padding: 0 1.5rem 1.25rem;
+    }
+
+    .page-nav a {
+      text-decoration: none;
+    }
+
+    .content-wrap {
+      padding: 0 1.5rem 1.5rem;
+    }
+
+    .panel {
+      border: 1px solid var(--dashboard-line);
+      border-radius: 1rem;
+      background: var(--dashboard-surface);
+    }
+
+    .metric-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    }
+
+    .metric-card {
+      padding: 1rem 1.1rem;
+    }
+
+    .metric-card strong {
+      display: block;
+      font-size: 1.8rem;
+    }
+
+    .metric-label {
+      color: var(--dashboard-muted);
+      font-size: 0.92rem;
+    }
+
+    .chart-card {
+      padding: 1rem;
+    }
+
+    .stack {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .cluster {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .process-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    }
+
+    .process-card,
+    .queue-card {
+      padding: 1rem;
+    }
+
+    .process-meta,
+    .queue-meta {
+      color: var(--dashboard-muted);
+      font-size: 0.92rem;
+    }
+
+    .ct-series-a .ct-line,
+    .ct-series-a .ct-point,
+    .ct-series-a .ct-bar {
+      stroke: #0e7490;
+    }
+
+    .ct-series-b .ct-line,
+    .ct-series-b .ct-point,
+    .ct-series-b .ct-bar {
+      stroke: #ef4444;
+    }
+
+    .ct-series-c .ct-line,
+    .ct-series-c .ct-point,
+    .ct-series-c .ct-bar {
+      stroke: #f59e0b;
+    }
+
+    .empty-state {
+      padding: 2rem 1rem;
+      text-align: center;
+      color: var(--dashboard-muted);
+    }
+  </style>
+
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.store("dashboard", {
+        autoRefresh: 0,
+        interval: null,
+        paused: false,
+        init() {
+          const storedValue = Number(window.sessionStorage.getItem("solid-queue-dashboard-lite:auto-refresh") || 0);
+          this.setAutoRefresh(storedValue);
+        },
+        setAutoRefresh(seconds) {
+          this.autoRefresh = Number(seconds || 0);
+          window.sessionStorage.setItem("solid-queue-dashboard-lite:auto-refresh", this.autoRefresh);
+
+          if (this.interval) {
+            window.clearInterval(this.interval);
+            this.interval = null;
+          }
+
+          if (this.autoRefresh > 0) {
+            this.interval = window.setInterval(() => {
+              if (!this.paused && !document.hidden) {
+                window.location.reload();
+              }
+            }, this.autoRefresh * 1000);
+          }
+        },
+        setPaused(value) {
+          this.paused = Boolean(value);
+        }
+      });
+    });
+  </script>
+
+  <%= yield :head %>
+</head>
+<body x-data="{ autoRefresh: 0, interval: null }"
+      x-init="autoRefresh = $store.dashboard.autoRefresh; $store.dashboard.init(); autoRefresh = $store.dashboard.autoRefresh"
+      x-on:dashboard-pause.window="$store.dashboard.setPaused($event.detail.paused)">
+<main class="container">
+  <div class="shell">
+    <header class="shell-header">
+      <div>
+        <h1 class="shell-title">Solid Queue Lite</h1>
+        <p class="shell-subtitle">Zero-build operational visibility with durable query boundaries.</p>
+      </div>
+
+      <div class="shell-controls">
+        <label>
+          Auto-refresh
+          <select x-model="autoRefresh" @change="$store.dashboard.setAutoRefresh(Number(autoRefresh))">
+            <option value="0">Off</option>
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+          </select>
+        </label>
+
+        <span class="status-pill" x-cloak>
+          <span x-show="!$store.dashboard.paused">Live</span>
+          <span x-show="$store.dashboard.paused">Paused</span>
+          <span>·</span>
+          <span x-text="autoRefresh === 0 ? 'Manual refresh' : `${autoRefresh}s cadence`"></span>
+        </span>
+      </div>
+    </header>
+
+    <nav class="page-nav">
+      <a href="<%= root_path %>">Dashboard</a>
+      <a href="<%= jobs_path %>">Jobs</a>
+      <a href="<%= processes_path %>">Processes</a>
+      <a href="<%= processes_path(format: :json) %>">Processes JSON</a>
+    </nav>
+
+    <div class="content-wrap">
+      <% if notice.present? %>
+        <p><mark><%= notice %></mark></p>
+      <% end %>
+      <% if alert.present? %>
+        <p><mark><%= alert %></mark></p>
+      <% end %>
+
+      <%= yield %>
+    </div>
+  </div>
+</main>
+</body>
+</html>

@@ -1,4 +1,4 @@
-module SoliqQueueLite
+module SolidQueueLite
   module ApplicationHelper
   end
 end

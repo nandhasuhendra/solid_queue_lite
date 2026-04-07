@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-# Specify your gem's dependencies in soliq_queue_lite.gemspec.
+# Specify your gem's dependencies in solid_queue_lite.gemspec.
 gemspec
 
 gem "puma"

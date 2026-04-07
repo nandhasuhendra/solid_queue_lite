@@ -1,0 +1,126 @@
+<% content_for :head do %>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chartist@0.11.4/dist/chartist.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/chartist@0.11.4/dist/chartist.min.js"></script>
+<% end %>
+
+<section>
+  <header style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: end; margin-bottom: 1rem;">
+    <div>
+      <h2>Pulse</h2>
+      <p>Historical queue telemetry from the self-pruning stats table.</p>
+    </div>
+
+    <nav aria-label="Time range">
+      <% ["1h", "6h", "24h"].each do |range| %>
+        <% if range == @selected_range %>
+          <strong><%= range %></strong>
+        <% else %>
+          <a href="<%= dashboard_path(range: range) %>"><%= range %></a>
+        <% end %>
+      <% end %>
+    </nav>
+  </header>
+
+  <div class="metric-grid" style="margin-bottom: 1rem;">
+    <article class="panel metric-card">
+      <span class="metric-label">Ready Jobs</span>
+      <strong><%= @current_ready_count %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Scheduled Jobs</span>
+      <strong><%= @current_scheduled_count %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Failed Backlog</span>
+      <strong><%= @current_failed_count %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Avg Latency</span>
+      <strong><%= @latest_stat&.avg_latency ? "#{@latest_stat.avg_latency.round(2)}s" : "n/a" %></strong>
+    </article>
+
+    <article class="panel metric-card">
+      <span class="metric-label">Workers / Dispatchers</span>
+      <strong><%= @worker_count %> / <%= @dispatcher_count %></strong>
+      <span class="metric-label"><%= @stale_process_count %> stale</span>
+    </article>
+  </div>
+
+  <% if @stats.empty? %>
+    <article class="panel empty-state">
+      No telemetry samples are available for the selected time window yet.
+    </article>
+  <% else %>
+    <div class="grid">
+      <article class="panel chart-card">
+        <header>
+          <h3 style="margin-bottom: 0.25rem;">Queue Volume</h3>
+          <p style="margin: 0; color: var(--dashboard-muted);">Ready versus scheduled snapshots.</p>
+        </header>
+        <div id="queue-volume-chart" class="ct-chart" style="height: 260px;"></div>
+      </article>
+
+      <article class="panel chart-card">
+        <header>
+          <h3 style="margin-bottom: 0.25rem;">Execution Outcomes</h3>
+          <p style="margin: 0; color: var(--dashboard-muted);">Successful completions versus failures inside each sampling window.</p>
+        </header>
+        <div id="execution-outcomes-chart" class="ct-chart" style="height: 260px;"></div>
+      </article>
+
+      <article class="panel chart-card">
+        <header>
+          <h3 style="margin-bottom: 0.25rem;">Latency Trend</h3>
+          <p style="margin: 0; color: var(--dashboard-muted);">Average claim latency over the selected window.</p>
+        </header>
+        <div id="latency-chart" class="ct-chart" style="height: 260px;"></div>
+      </article>
+    </div>
+
+    <script type="application/json" id="dashboard-chart-data"><%= raw json_escape(@chart_payload.to_json) %></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const payloadNode = document.getElementById("dashboard-chart-data");
+        if (!payloadNode || typeof Chartist === "undefined") return;
+
+        const payload = JSON.parse(payloadNode.textContent);
+        const labels = payload.labels;
+
+        new Chartist.Line("#queue-volume-chart", {
+          labels,
+          series: [payload.ready_counts, payload.scheduled_counts]
+        }, {
+          fullWidth: true,
+          chartPadding: { right: 20 },
+          low: 0,
+          showArea: false,
+          axisX: { showGrid: false }
+        });
+
+        new Chartist.Line("#execution-outcomes-chart", {
+          labels,
+          series: [payload.success_counts, payload.failed_counts]
+        }, {
+          fullWidth: true,
+          chartPadding: { right: 20 },
+          low: 0,
+          showArea: false,
+          axisX: { showGrid: false }
+        });
+
+        new Chartist.Bar("#latency-chart", {
+          labels,
+          series: [payload.avg_latencies]
+        }, {
+          fullWidth: true,
+          chartPadding: { right: 20 },
+          low: 0,
+          axisX: { showGrid: false }
+        });
+      });
+    </script>
+  <% end %>
+</section>

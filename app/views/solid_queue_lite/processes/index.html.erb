@@ -1,0 +1,111 @@
+<section class="stack">
+  <header style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: end;">
+    <div>
+      <h2>Processes</h2>
+      <p>Topology, heartbeats, and queue controls for live Solid Queue actors.</p>
+    </div>
+
+    <div class="cluster">
+      <span class="status-pill">
+        <span><%= @heartbeat[:stale_after_seconds] %>s threshold</span>
+      </span>
+
+      <form method="post" action="<%= prune_processes_path %>" style="margin: 0;">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+        <button type="submit" class="secondary">Prune stale processes</button>
+      </form>
+    </div>
+  </header>
+
+  <section>
+    <% if @processes.empty? %>
+      <article class="panel empty-state">No active Solid Queue processes are currently registered.</article>
+    <% else %>
+      <div class="process-grid">
+        <% @processes.each do |process| %>
+          <article class="panel process-card">
+            <div class="cluster" style="justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+              <div>
+                <h3 style="margin-bottom: 0.15rem;"><%= process[:kind] %></h3>
+                <div class="process-meta"><%= process[:name] %></div>
+              </div>
+
+              <% if process[:stale] %>
+                <span class="status-pill" style="background: rgba(239, 68, 68, 0.12); color: #b91c1c;">Stale</span>
+              <% else %>
+                <span class="status-pill">Healthy</span>
+              <% end %>
+            </div>
+
+            <p class="process-meta">PID <strong><%= process[:pid] %></strong> on <strong><%= process[:hostname].presence || "unknown host" %></strong></p>
+            <p class="process-meta">Last heartbeat: <strong><%= process[:last_heartbeat_at] %></strong></p>
+            <% if process[:supervisor_id].present? %>
+              <p class="process-meta">Supervisor ID: <strong><%= process[:supervisor_id] %></strong></p>
+            <% end %>
+
+            <% if process[:metadata].present? %>
+              <details>
+                <summary>Metadata</summary>
+                <pre style="margin-top: 0.75rem;"><%= JSON.pretty_generate(process[:metadata]) %></pre>
+              </details>
+            <% end %>
+          </article>
+        <% end %>
+      </div>
+    <% end %>
+  </section>
+
+  <section>
+    <header>
+      <h2>Queues</h2>
+      <p>Pause, resume, or clear ready jobs from a queue without leaving the dashboard.</p>
+    </header>
+
+    <% if @queues.empty? %>
+      <article class="panel empty-state">No queues have been observed yet.</article>
+    <% else %>
+      <div class="process-grid">
+        <% @queues.each do |queue| %>
+          <article class="panel queue-card">
+            <div class="cluster" style="justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+              <div>
+                <h3 style="margin-bottom: 0.15rem;"><%= queue[:name] %></h3>
+                <div class="queue-meta">Approx. ready jobs: <strong><%= queue[:ready_estimate] %></strong></div>
+              </div>
+
+              <% if queue[:paused] %>
+                <span class="status-pill" style="background: rgba(245, 158, 11, 0.12); color: #b45309;">Paused</span>
+              <% else %>
+                <span class="status-pill">Running</span>
+              <% end %>
+            </div>
+
+            <p class="queue-meta">Latency: <strong><%= queue[:human_latency] %></strong> (<%= queue[:latency_seconds] %>s)</p>
+
+            <div class="cluster">
+              <% if queue[:paused] %>
+                <form method="post" action="<%= resume_queues_path %>" style="margin: 0;">
+                  <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                  <input type="hidden" name="queue_name" value="<%= queue[:name] %>">
+                  <button type="submit" class="secondary">Resume</button>
+                </form>
+              <% else %>
+                <form method="post" action="<%= pause_queues_path %>" style="margin: 0;">
+                  <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                  <input type="hidden" name="queue_name" value="<%= queue[:name] %>">
+                  <button type="submit" class="secondary">Pause</button>
+                </form>
+              <% end %>
+
+              <form method="post" action="<%= clear_queues_path %>" style="margin: 0;">
+                <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+                <input type="hidden" name="queue_name" value="<%= queue[:name] %>">
+                <button type="submit" class="contrast">Clear ready jobs</button>
+              </form>
+            </div>
+          </article>
+        <% end %>
+      </div>
+    <% end %>
+  </section>
+</section>
