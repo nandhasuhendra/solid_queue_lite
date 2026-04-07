@@ -6,6 +6,8 @@ A minimal, zero-build web interface for [Solid Queue](https://github.com/rails/s
 
 The official `mission_control-jobs` engine is great, but it brings along Turbo, Stimulus, and expects a standard Rails asset pipeline. If you run an API-only app, use a modern JS framework, or just want to avoid frontend dependencies in your infrastructure tooling, Solid Queue Lite provides the same operational visibility without the build-step baggage.
 
+<img width="1512" height="1003" alt="574499032-9fe45dd4-f08f-4b12-b07e-b9394965b586" src="https://github.com/user-attachments/assets/a22f66d3-05a5-4d2a-ac01-ef219e40a038" />
+
 ## Installation
 
 Add the engine to your host application's Gemfile:
